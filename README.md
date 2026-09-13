@@ -4,6 +4,8 @@
 
 ZeroTrace revokes a departing person's access to one project across GitHub, Slack, and Google Drive — and proves it. It reads every provider again after mutating, verifies the removal independently of the write response, and refuses to report success unless every required postcondition was actually confirmed.
 
+**[Watch the 2-minute demo](https://drive.google.com/file/d/1ZGM0KUFx4f1vZY_VQfF6bRXSMVCmdxUp)**
+
 ## Why this exists
 
 Offboarding tools typically report success from an HTTP 200. That is not proof: a token can be revoked by the write call and still show up in a stale read, a mutation can silently fail with a 2xx-wrapped error, and "remove from Project X" can accidentally cascade into deleting messages, commits, or files the person authored. ZeroTrace treats *proof* as the product: every claim it shows an operator is backed by an evidence record captured from an independent, post-mutation read of the provider's own API.

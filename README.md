@@ -8,6 +8,26 @@ ZeroTrace revokes a departing person's access to one project across GitHub, Slac
 
 Offboarding tools typically report success from an HTTP 200. That is not proof: a token can be revoked by the write call and still show up in a stale read, a mutation can silently fail with a 2xx-wrapped error, and "remove from Project X" can accidentally cascade into deleting messages, commits, or files the person authored. ZeroTrace treats *proof* as the product: every claim it shows an operator is backed by an evidence record captured from an independent, post-mutation read of the provider's own API.
 
+## System & Reliability Brief
+
+Four design decisions carry the reliability claim:
+
+1. **The LLM's job ends at "understand the sentence."** `compile-intent.ts` is the only place an LLM is called, constrained to a fixed JSON schema. It cannot propose a provider call, cannot invent a missing email, and is never asked whether the workflow succeeded. If the request is missing something (usually an exact email — identity is never inferred from a name alone), the conversational flow asks a follow-up question instead of guessing.
+2. **Scope Lock is a deterministic gate every mutation must pass**, checked immediately before the call: approved plan hash, approved resource ID, approved subject, allowlisted operation type, fresh state matching preflight, never a content-deletion operation. A denial becomes a `BLOCKED` obligation, not a mutation.
+3. **Nothing is ever trusted from its own write response.** Every mutation is followed by an independent read-back against the provider's own API — obligation status comes only from that second read.
+4. **Final status is pure math over stored facts**, evaluated in a fixed priority order — `SAFETY_VIOLATION > BLOCKED > INCOMPLETE > UNVERIFIED > COMPLETE`. One failed obligation or one unknown invariant caps the whole run below `COMPLETE`, regardless of how many providers succeeded.
+
+**Reliability evidence** — four scenarios run for real against a live sandbox (real GitHub org, real Slack workspace, real Google Drive account) and independently re-verified against each provider's own API, not just ZeroTrace's own receipt:
+
+| Run | Proves | Result |
+| --- | --- | --- |
+| Complete revocation | Real cross-provider revocation + independent read-back | `COMPLETE` — confirmed via direct GitHub/Slack/Drive API calls outside the app |
+| Blast-radius containment | An unrelated project and another user are untouched | `COMPLETE` — unrelated access and the control user's access verified byte-identical before/after |
+| Idempotency | Re-running a completed request sends zero mutations | `COMPLETE` — all obligations `NOT_NEEDED`, empty operation ledger |
+| Ambiguity block | A genuinely ambiguous project name blocks before any mutation | `BLOCKED` — exact candidates named, zero mutations sent |
+
+Real bugs were found and fixed during this validation, not just anticipated in design: a spec-compliance bug where the LLM-unavailable fallback could silently authorize a run instead of always blocking; a database constraint that broke legitimate retries; a GitHub search-API quirk; a prompt that mis-flagged ordinary requests as out-of-scope. Full detail, exact run IDs, and independent-verification steps: [docs/integration-evidence.md](docs/integration-evidence.md). Condensed standalone version of this brief: [BRIEF.md](BRIEF.md).
+
 ## Architecture overview
 
 One Next.js (App Router) application. See [docs/architecture.md](docs/architecture.md) for the full picture and a diagram; in short:

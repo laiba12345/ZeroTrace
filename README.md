@@ -13,7 +13,6 @@ ZeroTrace revokes a departing person's access to one project across GitHub, Slac
 | **GitHub** | Revokes repository collaborator access; reads/preserves commits, issues, and pull requests as proof of authored history. |
 | **Slack** | Removes channel membership; reads/preserves authored messages as proof of history. |
 | **Google Drive** | Deletes folder-sharing permissions; preserves file ownership and content untouched. |
-| **Anthropic or OpenAI** | Powers the one conversational LLM call that turns a plain-English request into a structured, schema-validated intent (`LLM_PROVIDER` selects which). |
 
 All three provider integrations use each service's real REST API (Octokit, `@slack/web-api`, `googleapis`) against a live sandbox — no mocked adapters.
 

@@ -30,7 +30,10 @@ function client(): WebClient {
       safeMessage: "Slack is not configured (SLACK_BOT_TOKEN missing).",
     });
   }
-  return new WebClient(env.SLACK_BOT_TOKEN, { slackApiUrl: env.SLACK_API_BASE_URL });
+  return new WebClient(env.SLACK_BOT_TOKEN, {
+    slackApiUrl: env.SLACK_API_BASE_URL,
+    timeout: env.PROVIDER_READ_TIMEOUT_MS,
+  });
 }
 
 export const slackProvider: AccessProvider = {

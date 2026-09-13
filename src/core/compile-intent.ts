@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import OpenAI from "openai";
+import { z } from "zod";
 import { CompiledIntentSchema, type CompiledIntent } from "./domain";
 import { getEnv, type Env } from "@/lib/env";
 import { logger } from "@/lib/logger";
@@ -52,7 +53,7 @@ export async function compileIntent(rawInstruction: string): Promise<CompileInte
   }
 
   try {
-    const rawText = await callLLM(env, rawInstruction);
+    const rawText = await callLLM(env, SYSTEM_PROMPT, [{ role: "user", content: rawInstruction }]);
     if (rawText === null) {
       return { ok: false, reason: "PARSE_FAILED", detail: "LLM response contained no text content." };
     }
@@ -93,20 +94,19 @@ export async function compileIntent(rawInstruction: string): Promise<CompileInte
   }
 }
 
+export type ChatMessage = { role: "user" | "assistant"; content: string };
+
 // Provider-agnostic by design (LLM_PROVIDER/LLM_API_KEY/LLM_MODEL are
 // generic names) — intent compilation is one structured-output call with no
 // provider-specific behavior, so either backend satisfies the same contract.
-async function callLLM(env: Env, rawInstruction: string): Promise<string | null> {
+async function callLLM(env: Env, systemPrompt: string, messages: ChatMessage[]): Promise<string | null> {
   if (env.LLM_PROVIDER === "openai") {
     const client = new OpenAI({ apiKey: env.LLM_API_KEY });
     const response = await client.chat.completions.create({
       model: env.LLM_MODEL,
       temperature: 0,
       response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: rawInstruction },
-      ],
+      messages: [{ role: "system", content: systemPrompt }, ...messages],
     });
     return response.choices[0]?.message?.content ?? null;
   }
@@ -116,8 +116,8 @@ async function callLLM(env: Env, rawInstruction: string): Promise<string | null>
     model: env.LLM_MODEL,
     max_tokens: 1024,
     temperature: 0,
-    system: SYSTEM_PROMPT,
-    messages: [{ role: "user", content: rawInstruction }],
+    system: systemPrompt,
+    messages,
   });
   const textBlock = response.content.find((b) => b.type === "text");
   return textBlock && textBlock.type === "text" ? textBlock.text : null;
@@ -164,4 +164,102 @@ function blockedWithDeterministicPreview(rawInstruction: string): CompileIntentR
       ambiguities: [],
     },
   };
+}
+
+// ---------------------------------------------------------------------------
+// Conversational intake — lets the operator answer follow-up questions
+// (most commonly: the subject's exact email, since identity is never
+// inferred from a name alone) instead of being blocked outright for an
+// underspecified one-shot instruction. Still produces the exact same
+// CompiledIntent shape at the end, still never authorizes anything itself —
+// preflight resolves identity/project against real providers regardless of
+// how confident the chat turn was.
+// ---------------------------------------------------------------------------
+
+const CHAT_SYSTEM_PROMPT = `${SYSTEM_PROMPT}
+
+You are now having a short back-and-forth with the operator instead of compiling in one shot. If required information is missing or ambiguous — most commonly an exact email for the subject (a name alone is never enough to resolve identity), or which single project is meant — ask ONE short, specific, natural-sounding question for the single most important missing thing. Do not ask about anything already stated. Do not ask more than one question at a time.
+
+Once you have a clear subject with an exact, confirmed email, a clear single project, and the action is a plain project-access revocation, respond with the compiled result instead of another question — do not keep asking once you have enough to proceed.
+
+Respond with ONLY a JSON object in ONE of these two exact shapes, no prose, no markdown fences, no commentary outside the JSON:
+
+To ask a clarifying question:
+{"action": "ASK", "question": string}
+
+Once you have everything needed:
+{"action": "COMPILED", "intent": {
+  "subject": { "displayName": string, "email": string, "aliases": string[] },
+  "project": { "name": string, "slug": string | null },
+  "requestedAction": "REVOKE_PROJECT_ACCESS",
+  "preserveAuthoredContent": true,
+  "preserveUnrelatedAccess": true,
+  "confidence": number,
+  "ambiguities": string[]
+}}
+
+"email" in the COMPILED shape must be a real, non-null email address — if you do not have one yet, ask for it (action ASK) instead of compiling.`;
+
+const IntentChatTurnSchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("ASK"), question: z.string().min(1) }),
+  z.object({ action: z.literal("COMPILED"), intent: CompiledIntentSchema }),
+]);
+
+export type IntentChatTurnResult =
+  | { action: "ASK"; question: string }
+  | { action: "COMPILED"; intent: CompiledIntent }
+  | { action: "BLOCKED"; detail: string };
+
+export async function compileIntentChatTurn(messages: ChatMessage[]): Promise<IntentChatTurnResult> {
+  const env = getEnv();
+
+  if (!env.LLM_API_KEY) {
+    return {
+      action: "BLOCKED",
+      detail: "The intent compiler is unavailable (no LLM_API_KEY configured), so this run cannot proceed.",
+    };
+  }
+
+  try {
+    const rawText = await callLLM(env, CHAT_SYSTEM_PROMPT, messages);
+    if (rawText === null) {
+      return { action: "BLOCKED", detail: "The intent compiler returned no response." };
+    }
+
+    let parsedJson: unknown;
+    try {
+      parsedJson = JSON.parse(extractJson(rawText));
+    } catch {
+      return { action: "BLOCKED", detail: "The intent compiler's response was not valid JSON." };
+    }
+
+    const parsed = IntentChatTurnSchema.safeParse(parsedJson);
+    if (!parsed.success) {
+      return { action: "BLOCKED", detail: "The intent compiler's response did not match the expected shape." };
+    }
+
+    if (parsed.data.action === "ASK") {
+      return { action: "ASK", question: parsed.data.question };
+    }
+
+    // Defense in depth: even though the schema/prompt require a non-null
+    // email to compile, never let a slipped-through null silently reach
+    // preflight as a "confirmed" identity — fall back to asking for it.
+    if (!parsed.data.intent.subject.email) {
+      return { action: "ASK", question: "What's the exact email address for the person you'd like to offboard?" };
+    }
+
+    if (parsed.data.intent.confidence < env.INTENT_CONFIDENCE_THRESHOLD) {
+      return {
+        action: "ASK",
+        question:
+          "I want to make sure I have this right before proceeding — could you restate exactly who should be offboarded (name and email) and from which single project?",
+      };
+    }
+
+    return { action: "COMPILED", intent: parsed.data.intent };
+  } catch (err) {
+    logger.error(undefined, "compile-intent-chat: LLM call failed", { error: String(err) });
+    return { action: "BLOCKED", detail: "The intent compiler is temporarily unavailable. Please try again." };
+  }
 }

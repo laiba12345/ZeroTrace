@@ -1,8 +1,8 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ConnectionStatus } from "@/components/connection-status";
-import { CommandCard } from "@/components/command-card";
+import { IntentChat } from "@/components/intent-chat";
 import { IdentitySummary } from "@/components/identity-summary";
 import { AccessMatrix } from "@/components/access-matrix";
 import { ProviderChangeMockups } from "@/components/provider-change-mockups";
@@ -14,6 +14,7 @@ import { ReceiptDrawer } from "@/components/receipt-drawer";
 import { Badge } from "@/components/ui/badge";
 import { useRunStream } from "@/lib/use-run-stream";
 import type { RunDetail } from "@/lib/client-types";
+import type { CompiledIntent } from "@/core/domain";
 
 const TERMINAL_STATUSES = new Set(["COMPLETE", "INCOMPLETE", "UNVERIFIED", "BLOCKED", "SAFETY_VIOLATION"]);
 
@@ -31,18 +32,39 @@ export default function Home() {
     if (res.ok) setRun(await res.json());
   }, []);
 
+  // Reconstruct state from the persisted run on reload — the run ID lives in
+  // the URL so a refresh (or a shared link) lands back on the same run
+  // instead of losing the audit trail and showing a blank command card.
+  useEffect(() => {
+    const existing = new URLSearchParams(window.location.search).get("run");
+    if (existing) {
+      // One-time hydration from the URL (a truly external source), not a
+      // mirrored prop/state value — the pattern this rule otherwise guards against.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      refetchRun(existing).then(() => setRunId(existing));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (runId) url.searchParams.set("run", runId);
+    else url.searchParams.delete("run");
+    window.history.replaceState(null, "", url.toString());
+  }, [runId]);
+
   useRunStream(run && !TERMINAL_STATUSES.has(run.status) ? runId : null, () => {
     if (runId) refetchRun(runId);
   });
 
-  async function handleSubmit(instruction: string) {
+  async function handleCompiled(instruction: string, compiledIntent: CompiledIntent) {
     setSubmitting(true);
     setError(null);
     try {
       const res = await fetch("/api/preflight", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ instruction }),
+        body: JSON.stringify({ instruction, compiledIntent }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -120,7 +142,16 @@ export default function Home() {
       </header>
 
       {!runId && (
-        <CommandCard disabled={!allConnected} submitting={submitting} onSubmit={handleSubmit} />
+        <IntentChat disabled={!allConnected || submitting} onCompiled={handleCompiled} />
+      )}
+
+      {runId && !run && (
+        <div className="space-y-3">
+          <p className="text-sm text-muted">Loading run…</p>
+          <button onClick={reset} className="text-xs text-blue hover:underline">
+            Start a new request
+          </button>
+        </div>
       )}
 
       {error && (

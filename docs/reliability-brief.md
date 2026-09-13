@@ -46,9 +46,16 @@ Each provider's mutation is wrapped so a failure (`mutation.succeeded === false`
 
 Scope Lock's resourceId-membership check (`scope-lock.ts#isSameProject`) means a resolved resource that happens to share an ID pattern but belongs to an unapproved project cannot be mutated — project identity is enforced by plan membership captured at preflight, not re-derived at mutation time. Combined with the `ONLY_APPROVED_RESOURCES_TOUCHED` system invariant (checked against the operation ledger after execution), containment is checked twice: once before each mutation (preventively) and once after all mutations (as evidence).
 
+## Reliability hardening added after initial validation
+
+- **Provider read timeouts.** `PROVIDER_READ_TIMEOUT_MS` is wired into all three SDK clients (`AbortSignal.timeout()` for Octokit, `timeout` for `@slack/web-api`'s `WebClient`, `timeout` for `googleapis`/gaxios) — a hung provider request no longer blocks a run indefinitely.
+- **Bounded exponential backoff for safe reads.** `lib/with-retry.ts` retries only read-only, idempotent calls (identity/project resolution, access reads, verification reads) on `429`/`5xx`/network-timeout errors, up to 3 attempts with jittered exponential delay. Mutation calls (`revokeProjectAccess`) are never retried automatically, per the no-blind-mutation-retry rule.
+- **Reload no longer loses the run.** The run ID lives in the URL (`?run=<id>`); reloading the page, or sharing the link, reconstructs the full run view from `GET /api/runs/[id]` instead of dropping back to a blank command card.
+
 ## Current limitations
 
-- Not yet exercised against live provider credentials in this environment — see the README's "Known limitations" section.
 - GitHub's team-inherited-access detection assumes team `repos_count`/narrowness isn't independently re-verified before blocking; it always blocks rather than attempting a narrow team-membership removal, trading a slightly more conservative default for safety.
 - The SSE endpoint (`app/api/runs/[runId]/events/route.ts`) polls the database every 750ms rather than using a push-based bus — adequate for a single-instance demo, not for a multi-instance deployment.
 - Drive's "unrelated access" discovery relies on Drive's `'<email>' in writers` query operator working as documented for the service account/OAuth identity in use; some Workspace domain policies restrict this query for external Drive API callers.
+- No operator authentication on the preflight/approve routes (only execution is bound to a one-time token) — fine for local/demo use, not for any networked deployment.
+- No CSRF protection beyond the browser's default same-origin fetch behavior.

@@ -42,7 +42,7 @@ export function ExecutionTimeline({
                 </div>
                 <div className="mt-1 w-px flex-1 bg-border" />
               </div>
-              <div className="flex-1 pb-2">
+              <div className="flex-1 pb-2" aria-live="polite" aria-atomic="false">
                 <div className="mb-1.5 flex items-center gap-2">
                   <span className="text-sm font-medium text-foreground">{providerLabel(provider)}</span>
                   {obligation && <Badge tone={obligationTone(obligation.status)}>{obligation.status}</Badge>}

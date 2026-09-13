@@ -7,7 +7,8 @@ import { deriveIdempotencyKey } from "@/lib/ids";
 import { getProvider, PROVIDER_ORDER, OPERATION_TYPE_FOR_PROVIDER } from "@/providers";
 import type { ProviderName, AccessSnapshot, PreservationSnapshot } from "@/providers/types";
 import { classifyProviderError } from "./errors";
-import type { ApprovedPlan, ApprovedPlanTarget, ResolvedIdentity, ResolvedProject } from "./domain";
+import { withRetry } from "@/lib/with-retry";
+import type { ApprovedPlan, ApprovedPlanTarget, CompiledIntent, ResolvedIdentity, ResolvedProject } from "./domain";
 import { InvariantNames } from "./domain";
 
 export type PreflightResult = {
@@ -17,7 +18,10 @@ export type PreflightResult = {
   ambiguities: string[];
 };
 
-export async function runPreflight(rawInstruction: string): Promise<PreflightResult> {
+export async function runPreflight(
+  rawInstruction: string,
+  precompiledIntent?: CompiledIntent
+): Promise<PreflightResult> {
   const runId = newRunId();
   const blockers: string[] = [];
 
@@ -30,20 +34,31 @@ export async function runPreflight(rawInstruction: string): Promise<PreflightRes
       status: "DRAFT",
     },
   });
-  await appendRunEvent({ runId, phase: "COMPILE_INTENT", message: "Compiling operator instruction." });
 
-  const intentResult = await compileIntent(rawInstruction);
-  if (!intentResult.ok) {
-    const label = intentResult.reason === "LLM_UNAVAILABLE" ? "BLOCKED: INTENT_COMPILER_UNAVAILABLE" : intentResult.reason;
-    if (intentResult.understoodIntent) {
-      await prisma.run.update({
-        where: { id: runId },
-        data: { compiledIntent: JSON.stringify(intentResult.understoodIntent) },
-      });
+  let intent: CompiledIntent;
+  if (precompiledIntent) {
+    // Already compiled by the conversational intake flow
+    // (core/compile-intent.ts#compileIntentChatTurn) — never trusted
+    // blindly just because it arrived pre-compiled: identity/project still
+    // get resolved against real providers exactly as below, and an empty
+    // email is still impossible to reach here (compileIntentChatTurn never
+    // emits COMPILED with a null email).
+    intent = precompiledIntent;
+  } else {
+    await appendRunEvent({ runId, phase: "COMPILE_INTENT", message: "Compiling operator instruction." });
+    const intentResult = await compileIntent(rawInstruction);
+    if (!intentResult.ok) {
+      const label = intentResult.reason === "LLM_UNAVAILABLE" ? "BLOCKED: INTENT_COMPILER_UNAVAILABLE" : intentResult.reason;
+      if (intentResult.understoodIntent) {
+        await prisma.run.update({
+          where: { id: runId },
+          data: { compiledIntent: JSON.stringify(intentResult.understoodIntent) },
+        });
+      }
+      return await block(runId, [`${label}: ${intentResult.detail}`]);
     }
-    return await block(runId, [`${label}: ${intentResult.detail}`]);
+    intent = intentResult.intent;
   }
-  const intent = intentResult.intent;
 
   await prisma.run.update({
     where: { id: runId },
@@ -52,7 +67,7 @@ export async function runPreflight(rawInstruction: string): Promise<PreflightRes
   await appendRunEvent({
     runId,
     phase: "COMPILE_INTENT",
-    message: `Intent compiled via ${intentResult.source}.`,
+    message: precompiledIntent ? "Intent compiled via conversational intake." : "Intent compiled via llm.",
     data: intent,
   });
 
@@ -103,8 +118,8 @@ export async function runPreflight(rawInstruction: string): Promise<PreflightRes
     let access: AccessSnapshot;
     let preservation: PreservationSnapshot;
     try {
-      access = await provider.readProjectAccess(target);
-      preservation = await provider.capturePreservationSnapshot(target);
+      access = await withRetry(() => provider.readProjectAccess(target));
+      preservation = await withRetry(() => provider.capturePreservationSnapshot(target));
     } catch (err) {
       blockers.push(`${providerName}: ${classifyProviderError(err).safeMessage}`);
       continue;
@@ -317,7 +332,7 @@ async function settledCandidates<T>(
   blockers: string[]
 ): Promise<T[]> {
   try {
-    return await call();
+    return await withRetry(call);
   } catch (err) {
     const providerError = classifyProviderError(err);
     blockers.push(`${providerName}: ${providerError.safeMessage}`);

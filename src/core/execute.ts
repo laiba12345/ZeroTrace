@@ -8,6 +8,7 @@ import { verifyObligationPostcondition, verifyInvariants } from "./verify";
 import { determineWorkflowStatus } from "./determine-status";
 import type { ApprovedPlan, ObligationStatusValue } from "./domain";
 import { ZeroTraceError } from "./errors";
+import { withRetry } from "@/lib/with-retry";
 
 export async function approveRun(runId: string, approverIdentity?: string): Promise<{ approvalToken: string }> {
   const run = await prisma.run.findUnique({ where: { id: runId } });
@@ -145,7 +146,7 @@ async function executeProvider(params: {
   }
 
   // READ (fresh, immediately pre-mutation) → SCOPE LOCK → REVOKE → READ BACK → VERIFY
-  const freshAccess = await provider.readProjectAccess(target);
+  const freshAccess = await withRetry(() => provider.readProjectAccess(target));
   await recordEvidence({
     runId,
     obligationId: obligation.id,

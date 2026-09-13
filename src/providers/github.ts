@@ -40,7 +40,14 @@ function client(): Octokit {
       safeMessage: "GitHub is not configured (GITHUB_TOKEN missing).",
     });
   }
-  return new Octokit({ auth: env.GITHUB_TOKEN, baseUrl: env.GITHUB_API_BASE_URL });
+  return new Octokit({
+    auth: env.GITHUB_TOKEN,
+    baseUrl: env.GITHUB_API_BASE_URL,
+    // Bounds this client instance's whole operation (client() is called
+    // fresh per adapter method), not just a single HTTP call — several
+    // methods here fire multiple requests in parallel via Promise.all.
+    request: { signal: AbortSignal.timeout(env.PROVIDER_READ_TIMEOUT_MS) },
+  });
 }
 
 export const githubProvider: AccessProvider = {

@@ -36,7 +36,7 @@ function client(): drive_v3.Drive {
   }
   const auth = new google.auth.OAuth2(env.GOOGLE_CLIENT_ID, env.GOOGLE_CLIENT_SECRET);
   auth.setCredentials({ refresh_token: env.GOOGLE_REFRESH_TOKEN });
-  return google.drive({ version: "v3", auth });
+  return google.drive({ version: "v3", auth, timeout: env.PROVIDER_READ_TIMEOUT_MS });
 }
 
 export const driveProvider: AccessProvider = {

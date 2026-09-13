@@ -16,13 +16,18 @@ Every arrow is backed by a persisted row: `Run`, `Obligation`, `InvariantResult`
 
 ## The intent compilation boundary
 
-`src/core/compile-intent.ts` makes exactly one LLM call, constrained by `SYSTEM_PROMPT` to emit only a `CompiledIntent` JSON object validated by `CompiledIntentSchema` (Zod, `src/core/domain.ts`). The LLM:
+`src/core/compile-intent.ts` is constrained, in both the modes below, to emit only a `CompiledIntent` JSON object validated by `CompiledIntentSchema` (Zod, `src/core/domain.ts`). The LLM:
 
 - **cannot** propose a provider API call, URL, or action beyond the literal `"REVOKE_PROJECT_ACCESS"`;
-- **cannot** invent a missing email or project slug — ambiguity becomes an `ambiguities[]` entry and blocks the run;
+- **cannot** invent a missing email or project slug — ambiguity becomes an `ambiguities[]` entry (one-shot mode) or a clarifying question (conversational mode), never a guess;
 - **cannot** decide whether the workflow ultimately succeeded — that boundary is enforced structurally: `compile-intent.ts` has no import of `determine-status.ts`, and `execute.ts` never asks the LLM anything.
 
-If the LLM is unavailable, a deterministic fallback pattern-matches only the single pre-seeded demo sentence and labels the run `BLOCKED: INTENT_COMPILER_UNAVAILABLE` — it still cannot reach approval on its own merit; an operator has to notice it's a fallback-sourced intent.
+Two modes share this boundary:
+
+- **One-shot** (`compileIntent`) — a single call for a complete instruction submitted all at once. Used by any programmatic caller of `POST /api/preflight` that doesn't go through the chat UI.
+- **Conversational** (`compileIntentChatTurn`, `POST /api/intent-chat`) — the default UI flow. Each turn is still one stateless, schema-constrained call (the client resends the full message history), but the model may respond `{"action":"ASK","question":...}` instead of compiling, when required information — most commonly an exact email, since identity is never inferred from a name alone — is missing. It only emits `{"action":"COMPILED","intent":...}` once it has enough; a `COMPILED` response with a null email is rejected server-side and converted back into a question as a defense-in-depth check. Either way, the compiled intent is **not** trusted as identity — `runPreflight` still independently resolves the subject and project against each provider's real API exactly as in one-shot mode.
+
+If the LLM is unavailable in either mode, the run is blocked (`BLOCKED: INTENT_COMPILER_UNAVAILABLE` in one-shot mode; the chat turn returns `action: "BLOCKED"`) — a deterministic fallback exists only for the single pre-seeded demo sentence in one-shot mode, purely to show what a plain parser would have extracted for troubleshooting, and it still cannot reach approval on its own merit.
 
 ## The deterministic Scope Lock
 

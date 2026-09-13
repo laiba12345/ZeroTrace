@@ -13,8 +13,8 @@ Offboarding tools typically report success from an HTTP 200. That is not proof: 
 One Next.js (App Router) application. See [docs/architecture.md](docs/architecture.md) for the full picture and a diagram; in short:
 
 ```
-Operator instruction
-  → compile-intent (one structured LLM call, strict schema)
+Operator instruction (conversational — ZeroTrace asks if anything's missing)
+  → compile-intent (schema-constrained LLM turns, never guesses identity)
   → resolve identity/project (exact provider IDs, never fuzzy)
   → preflight (read current access + capture preservation snapshot)
   → human approval (explicit, binds an approval token to a plan hash)
@@ -25,7 +25,7 @@ Operator instruction
 
 Key modules:
 
-- `src/core/compile-intent.ts` — the only LLM call, constrained to a fixed JSON schema (`src/core/domain.ts`), rejects anything outside `REVOKE_PROJECT_ACCESS`.
+- `src/core/compile-intent.ts` — the only place that calls an LLM, constrained to a fixed JSON schema (`src/core/domain.ts`), rejects anything outside `REVOKE_PROJECT_ACCESS`. Supports a one-shot mode (a complete instruction in one call) and a conversational mode (`POST /api/intent-chat`) that asks a clarifying question — most commonly for an exact email — instead of guessing or blocking outright; either way the compiled intent is re-verified against real providers, never trusted as identity on its own.
 - `src/core/scope-lock.ts` — deterministic policy function every mutation must pass; denies anything outside the approved plan, allowlisted action types, or current plan hash.
 - `src/core/preflight.ts`, `src/core/execute.ts`, `src/core/verify.ts` — the read → approve → mutate → verify lifecycle.
 - `src/core/determine-status.ts` — pure, priority-ordered status derivation (`SAFETY_VIOLATION > BLOCKED > INCOMPLETE > UNVERIFIED > COMPLETE`). No LLM anywhere near this file.
@@ -48,7 +48,7 @@ The app runs at `http://localhost:3000`.
 
 ### Provider credential / sandbox setup
 
-ZeroTrace refuses to fake a connection — the header's provider badges call `/api/connections`, which performs a real, harmless read against each provider (`users.getAuthenticated`, `auth.test`, `about.get`). Until real credentials are present, all three show **disconnected**, and the command card's "Analyze request" button stays disabled by design (Phase A — Connection Gate). This is expected, not a bug: **do not weaken the gate to make the demo run without credentials.**
+ZeroTrace refuses to fake a connection — the header's provider badges call `/api/connections`, which performs a real, harmless read against each provider (`users.getAuthenticated`, `auth.test`, `about.get`). Until real credentials are present, all three show **disconnected**, and the offboarding request input stays disabled by design (Phase A — Connection Gate). This is expected, not a bug: **do not weaken the gate to make the demo run without credentials.**
 
 Fill in `.env`:
 

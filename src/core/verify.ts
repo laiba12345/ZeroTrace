@@ -1,6 +1,7 @@
 import type { AccessProvider, AccessTarget, PreservationSnapshot } from "@/providers/types";
 import { recordEvidence } from "./evidence";
 import type { ObligationStatusValue } from "./domain";
+import { withRetry } from "@/lib/with-retry";
 
 export type ObligationVerification = {
   status: ObligationStatusValue;
@@ -18,7 +19,7 @@ export async function verifyObligationPostcondition(
 ): Promise<ObligationVerification> {
   const evidenceIds: string[] = [];
 
-  const verification = await provider.verifyNoProjectAccess(target).catch(() => ({
+  const verification = await withRetry(() => provider.verifyNoProjectAccess(target)).catch(() => ({
     provider: provider.name,
     resourceId: target.resourceId,
     subjectProviderId: target.subjectProviderId,
@@ -56,7 +57,7 @@ export async function verifyInvariants(
   target: AccessTarget,
   runId: string
 ): Promise<{ name: string; status: "PASS" | "FAIL" | "UNKNOWN"; detail: string; evidenceId: string }[]> {
-  const results = await provider.verifyPreservation(before, target).catch(() =>
+  const results = await withRetry(() => provider.verifyPreservation(before, target)).catch(() =>
     (["AUTHORED_HISTORY_PRESERVED", "UNRELATED_PROJECT_ACCESS_PRESERVED", "OTHER_USERS_UNCHANGED"] as const).map(
       (name) => ({
         name,

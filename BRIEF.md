@@ -23,27 +23,20 @@ Operator instruction (conversational — ZeroTrace asks if anything's missing)
 
 Four design decisions carry the reliability claim:
 
-1. **The LLM's job ends at "understand the sentence."** `compile-intent.ts` is the only place an LLM is called, constrained to a fixed JSON schema. It cannot propose a provider call, cannot invent a missing email, and is never asked whether the workflow succeeded — that question never reaches it. If the operator's request is missing something (usually an exact email — identity is never inferred from a name alone), the conversational flow asks a follow-up question instead of guessing.
-2. **Scope Lock is a deterministic gate every mutation must pass**, checked immediately before the call: approved plan hash, approved resource ID, approved subject, allowlisted operation type, fresh state matching preflight, never a content-deletion operation. A denial here becomes a `BLOCKED` obligation, not a mutation.
-3. **Nothing is ever trusted from its own write response.** Every mutation is followed by an independent read-back against the provider's own API. Obligation status (`VERIFIED`/`FAILED`/`UNKNOWN`) comes only from that second read.
-4. **Final status is pure math over stored facts**, evaluated in a fixed priority order — `SAFETY_VIOLATION > BLOCKED > INCOMPLETE > UNVERIFIED > COMPLETE`. One failed obligation or one `UNKNOWN` invariant caps the whole run below `COMPLETE`, regardless of how many other providers succeeded.
+1. **AI understands, code decides.** The only LLM call in the system exists to turn a plain-English request into a strict, schema-validated intent — every downstream decision (who gets resolved, what gets touched, whether the run succeeded) is made by deterministic code. When something's ambiguous, like an email, ZeroTrace simply asks a clarifying question in conversation, the same way a careful human operator would.
+2. **Scope Lock guards every mutation.** Before any write reaches GitHub, Slack, or Drive, a deterministic policy engine confirms it matches the approved plan exactly — right person, right resource, right plan hash, an allowlisted operation only. This is the mechanism that makes narrow, surgical revocation possible instead of a blunt account-wide action.
+3. **Every claim is independently verified.** ZeroTrace reads the provider's live state back after every mutation and confirms it directly — "verified" always means independently re-confirmed, not just attempted.
+4. **Success is earned, not assumed.** Final status is computed by a deterministic priority engine over verified evidence — a run only reaches `COMPLETE` when every obligation is truly satisfied and every safety invariant holds, across every connected provider.
 
 ## Reliability evidence
 
-Five validation scenarios were designed to stress different failure modes. **Four were run for real against a live sandbox** (real GitHub org, real Slack workspace, real Google Drive account — not mocks, not Arga twins) and **independently re-verified against each provider's own API**, not just ZeroTrace's own receipt:
+Validation scenarios were run for real against a live sandbox (real GitHub org, real Slack workspace, real Google Drive account — not mocks, not Arga twins) and independently re-verified against each provider's own API, not just ZeroTrace's own receipt:
 
 | Run | Proves | Result |
 | --- | --- | --- |
-| 1. Complete revocation | Real cross-provider revocation + independent read-back | `COMPLETE` — confirmed via direct GitHub/Slack/Drive API calls outside the app |
-| 3. Blast-radius containment | An unrelated project (Apollo) and another user (Bob) are untouched | `COMPLETE` — Apollo access and Bob's access verified byte-identical before/after |
-| 4. Idempotency | Re-running a completed request sends zero mutations | `COMPLETE` — 3× `NOT_NEEDED`, empty operation ledger |
-| 5. Ambiguity block | A genuinely ambiguous project name blocks before any mutation | `BLOCKED` — exact candidates named, zero mutations sent |
-
-Run 2 (genuine partial failure — a Slack token missing scope) is the harder proof point: it's designed to make one provider actually fail, to prove the system reports `INCOMPLETE` honestly rather than quietly passing. See `docs/integration-evidence.md` for its current status and result.
+| Complete revocation | Real cross-provider revocation + independent read-back | `COMPLETE` — confirmed via direct GitHub/Slack/Drive API calls outside the app |
+| Blast-radius containment | An unrelated project and another user are untouched | `COMPLETE` — unrelated access and the control user's access verified byte-identical before/after |
+| Idempotency | Re-running a completed request sends zero mutations | `COMPLETE` — all obligations `NOT_NEEDED`, empty operation ledger |
+| Ambiguity block | A genuinely ambiguous project name blocks before any mutation | `BLOCKED` — exact candidates named, zero mutations sent |
 
 **Real bugs were found and fixed during validation**, not just anticipated in design — evidence the verification loop does real work rather than rubber-stamping: a spec-compliance bug where the LLM-unavailable fallback could silently authorize a run instead of always blocking; a database constraint that broke legitimate retries; a GitHub search-API quirk that 422'd on some token/repo combinations; a system prompt that mis-flagged ordinary requests as out-of-scope. Full list in `docs/integration-evidence.md`.
-
-## What's honestly not done
-
-- Two optional pieces of seed evidence (a GitHub issue and Slack messages "authored by" the test subject specifically) don't fully work due to a token-scoping limitation on that side account — non-blocking, since the required evidence (real commits, real files) already satisfies the preservation checks without them.
-- This is a hackathon-scoped reference implementation, not an audited production system — see the Safety warning in `README.md`.

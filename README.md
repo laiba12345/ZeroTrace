@@ -12,10 +12,10 @@ Offboarding tools typically report success from an HTTP 200. That is not proof: 
 
 Four design decisions carry the reliability claim:
 
-1. **The LLM's job ends at "understand the sentence."** `compile-intent.ts` is the only place an LLM is called, constrained to a fixed JSON schema. It cannot propose a provider call, cannot invent a missing email, and is never asked whether the workflow succeeded. If the request is missing something (usually an exact email — identity is never inferred from a name alone), the conversational flow asks a follow-up question instead of guessing.
-2. **Scope Lock is a deterministic gate every mutation must pass**, checked immediately before the call: approved plan hash, approved resource ID, approved subject, allowlisted operation type, fresh state matching preflight, never a content-deletion operation. A denial becomes a `BLOCKED` obligation, not a mutation.
-3. **Nothing is ever trusted from its own write response.** Every mutation is followed by an independent read-back against the provider's own API — obligation status comes only from that second read.
-4. **Final status is pure math over stored facts**, evaluated in a fixed priority order — `SAFETY_VIOLATION > BLOCKED > INCOMPLETE > UNVERIFIED > COMPLETE`. One failed obligation or one unknown invariant caps the whole run below `COMPLETE`, regardless of how many providers succeeded.
+1. **AI understands, code decides.** The only LLM call in the system exists to turn a plain-English request into a strict, schema-validated intent — every downstream decision (who gets resolved, what gets touched, whether the run succeeded) is made by deterministic code. When something's ambiguous, like an email, ZeroTrace simply asks a clarifying question in conversation, the same way a careful human operator would — turning a hard requirement into a natural back-and-forth instead of a dead end.
+2. **Scope Lock guards every mutation.** Before any write reaches GitHub, Slack, or Drive, a deterministic policy engine confirms it matches the approved plan exactly — right person, right resource, right plan hash, an allowlisted operation only. This is the mechanism that makes narrow, surgical revocation possible instead of a blunt account-wide action.
+3. **Every claim is independently verified.** ZeroTrace reads the provider's live state back after every mutation and confirms it directly — "verified" always means independently re-confirmed, not just attempted.
+4. **Success is earned, not assumed.** Final status is computed by a deterministic priority engine over verified evidence — a run only reaches `COMPLETE` when every obligation is truly satisfied and every safety invariant holds, across every connected provider.
 
 **Reliability evidence** — four scenarios run for real against a live sandbox (real GitHub org, real Slack workspace, real Google Drive account) and independently re-verified against each provider's own API, not just ZeroTrace's own receipt:
 

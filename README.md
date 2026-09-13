@@ -6,6 +6,17 @@
 
 ZeroTrace revokes a departing person's access to one project across GitHub, Slack, and Google Drive — and proves it. It reads every provider again after mutating, verifies the removal independently of the write response, and refuses to report success unless every required postcondition was actually confirmed.
 
+## External apps used
+
+| App | Role in ZeroTrace |
+| --- | --- |
+| **GitHub** | Revokes repository collaborator access; reads/preserves commits, issues, and pull requests as proof of authored history. |
+| **Slack** | Removes channel membership; reads/preserves authored messages as proof of history. |
+| **Google Drive** | Deletes folder-sharing permissions; preserves file ownership and content untouched. |
+| **Anthropic or OpenAI** | Powers the one conversational LLM call that turns a plain-English request into a structured, schema-validated intent (`LLM_PROVIDER` selects which). |
+
+All three provider integrations use each service's real REST API (Octokit, `@slack/web-api`, `googleapis`) against a live sandbox — no mocked adapters.
+
 ## Why this exists
 
 Offboarding tools typically report success from an HTTP 200. That is not proof: a token can be revoked by the write call and still show up in a stale read, a mutation can silently fail with a 2xx-wrapped error, and "remove from Project X" can accidentally cascade into deleting messages, commits, or files the person authored. ZeroTrace treats *proof* as the product: every claim it shows an operator is backed by an evidence record captured from an independent, post-mutation read of the provider's own API.

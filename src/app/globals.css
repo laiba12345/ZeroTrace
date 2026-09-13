@@ -1,0 +1,86 @@
+@import "tailwindcss";
+
+:root {
+  --background: #0a0c0f;
+  --surface: #12151a;
+  --surface-raised: #171b21;
+  --border: #23282f;
+  --border-strong: #313841;
+  --foreground: #e7eaee;
+  --muted: #8a919c;
+  --muted-2: #5c636d;
+
+  --emerald: #34d399;
+  --emerald-dim: #0f2c22;
+  --amber: #fbbf24;
+  --amber-dim: #2e2410;
+  --red: #f87171;
+  --red-dim: #331313;
+  --blue: #60a5fa;
+  --blue-dim: #10202f;
+
+  --font-mono-ui: "SFMono-Regular", ui-monospace, Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-muted-2: var(--muted-2);
+  --color-emerald: var(--emerald);
+  --color-emerald-dim: var(--emerald-dim);
+  --color-amber: var(--amber);
+  --color-amber-dim: var(--amber-dim);
+  --color-red: var(--red);
+  --color-red-dim: var(--red-dim);
+  --color-blue: var(--blue);
+  --color-blue-dim: var(--blue-dim);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+}
+
+.font-evidence {
+  font-family: var(--font-mono-ui);
+  letter-spacing: -0.01em;
+}
+
+@media print {
+  body {
+    background: white;
+    color: black;
+  }
+  .no-print {
+    display: none !important;
+  }
+  body * {
+    visibility: hidden;
+  }
+  #receipt-root,
+  #receipt-root * {
+    visibility: visible;
+  }
+  #receipt-root {
+    position: absolute;
+    inset: 0;
+    background: white !important;
+    color: black !important;
+  }
+  #receipt-root .receipt-printable {
+    max-width: 100%;
+    border: none;
+  }
+}

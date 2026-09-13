@@ -1,0 +1,152 @@
+// ZeroTrace domain persistence.
+// SQLite for local demo. Swap `provider`/`url` for PostgreSQL when available.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum RunStatus {
+  DRAFT
+  BLOCKED
+  PREFLIGHT_READY
+  APPROVED
+  EXECUTING
+  COMPLETE
+  INCOMPLETE
+  UNVERIFIED
+  SAFETY_VIOLATION
+}
+
+enum ObligationStatus {
+  PENDING
+  VERIFIED
+  FAILED
+  BLOCKED
+  UNKNOWN
+  NOT_NEEDED
+}
+
+enum InvariantResultStatus {
+  PASS
+  FAIL
+  UNKNOWN
+}
+
+model Run {
+  id                String   @id @default(cuid())
+  // Deliberately NOT unique: many separate Run rows (a blocked attempt, a
+  // retry, a later legitimate re-run of an already-completed request) can
+  // share the same normalized idempotencyKey. Idempotent-rerun behavior
+  // comes from preflight always re-reading live provider state, not from a
+  // DB constraint — this field exists for lookup/audit grouping only.
+  idempotencyKey    String
+  rawInstruction    String
+  compiledIntent    String // JSON: CompiledIntent
+  resolvedIdentity  String? // JSON: ResolvedIdentity
+  resolvedProject   String? // JSON: ResolvedProject
+  beforeState       String? // JSON: access matrix / preservation snapshots
+  approvedPlan      String? // JSON: immutable plan snapshot, set at approval
+  planHash          String?
+  approvalToken     String?
+  approvedAt        DateTime?
+  approvedBy        String?
+  status            RunStatus @default(DRAFT)
+  blockers          String? // JSON string[]
+  ambiguities       String? // JSON string[]
+  startedAt         DateTime?
+  completedAt       DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  obligations       Obligation[]
+  invariantResults  InvariantResult[]
+  evidenceRecords   EvidenceRecord[]
+  operationLedger   OperationLedgerEntry[]
+  events            RunEvent[]
+
+  @@index([idempotencyKey])
+}
+
+model Obligation {
+  id                    String            @id @default(cuid())
+  runId                 String
+  run                   Run               @relation(fields: [runId], references: [id])
+  provider              String // github | slack | drive
+  subjectId             String
+  resourceId            String
+  requiredPostcondition String // NO_PROJECT_ACCESS
+  status                ObligationStatus  @default(PENDING)
+  mutationAttempted     Boolean           @default(false)
+  errorCategory         String?
+  errorProviderCode     String?
+  errorSafeMessage      String?
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  evidenceRecords       EvidenceRecord[]
+}
+
+model InvariantResult {
+  id         String                 @id @default(cuid())
+  runId      String
+  run        Run                    @relation(fields: [runId], references: [id])
+  name       String // e.g. AUTHORED_HISTORY_PRESERVED
+  provider   String
+  status     InvariantResultStatus  @default(UNKNOWN)
+  detail     String?
+  createdAt  DateTime               @default(now())
+
+  evidenceRecords EvidenceRecord[]
+}
+
+model EvidenceRecord {
+  id               String    @id @default(cuid())
+  runId            String
+  run              Run       @relation(fields: [runId], references: [id])
+  obligationId     String?
+  obligation       Obligation? @relation(fields: [obligationId], references: [id])
+  invariantResultId String?
+  invariantResult  InvariantResult? @relation(fields: [invariantResultId], references: [id])
+  provider         String // github | slack | drive | system
+  phase            String // BEFORE | MUTATION | AFTER | INVARIANT
+  resourceType     String
+  resourceId       String
+  observedAt       DateTime
+  requestId        String?
+  assertion        String
+  result           String // PASS | FAIL | UNKNOWN
+  normalizedValue  String // JSON, redacted
+  payloadHash      String
+  createdAt        DateTime  @default(now())
+}
+
+model OperationLedgerEntry {
+  id             String    @id @default(cuid())
+  runId          String
+  run            Run       @relation(fields: [runId], references: [id])
+  operationType  String // e.g. GITHUB_REVOKE_REPO_OR_PROJECT_TEAM_ACCESS
+  provider       String
+  targetId       String
+  planHash       String
+  startedAt      DateTime
+  finishedAt     DateTime?
+  result         String? // SUCCESS | FAILED | BLOCKED
+  providerRequestId String?
+  createdAt      DateTime  @default(now())
+}
+
+model RunEvent {
+  id        String   @id @default(cuid())
+  runId     String
+  run       Run      @relation(fields: [runId], references: [id])
+  phase     String
+  provider  String?
+  message   String
+  data      String? // JSON
+  createdAt DateTime @default(now())
+}

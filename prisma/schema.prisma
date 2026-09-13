@@ -1,12 +1,14 @@
 // ZeroTrace domain persistence.
-// SQLite for local demo. Swap `provider`/`url` for PostgreSQL when available.
+// PostgreSQL — required for serverless hosting (Vercel's functions have no
+// persistent filesystem, so SQLite's single-file database doesn't survive
+// between invocations). Point DATABASE_URL at any hosted Postgres.
 
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 

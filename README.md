@@ -72,6 +72,21 @@ This needs a few more `.env` values beyond the provider credentials above — `A
 
 ZeroTrace does not ship a self-authored test suite — verification is core runtime behavior, not a test substitute. Instead, run the five scenarios in [scripts/run-real-validation.md](scripts/run-real-validation.md) against real sandbox state and record the outcomes in [docs/integration-evidence.md](docs/integration-evidence.md).
 
+## Deploying (Vercel)
+
+ZeroTrace can trigger real provider mutations, so a public deployment needs two things the default local setup doesn't:
+
+1. **A hosted Postgres database.** SQLite's single-file database doesn't survive between invocations of a serverless function. `prisma/schema.prisma` already targets `postgresql` — provision any Postgres (Vercel's own Postgres storage integration, Neon, Supabase, Railway all work) and set `DATABASE_URL` to it. If your provider offers a "pooled"/`pgbouncer` connection string, prefer that one. Push the schema once: `npx prisma db push`.
+2. **`ZEROTRACE_OPERATOR_SESSION_SECRET`.** Set this to a strong random string. It gates the entire app behind a single shared passcode (`/login`) — without it, anyone with the URL could submit real offboarding requests against your connected providers.
+
+Then:
+
+1. Push this repo to GitHub (if you haven't already).
+2. On [vercel.com](https://vercel.com), **Add New → Project**, import the repo.
+3. Under **Environment Variables**, add every variable from `.env.example` that you use (`DATABASE_URL`, `ZEROTRACE_OPERATOR_SESSION_SECRET`, `LLM_PROVIDER`/`LLM_API_KEY`/`LLM_MODEL`, `GITHUB_TOKEN`/`GITHUB_ORG`, `SLACK_BOT_TOKEN`, `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`/`GOOGLE_REFRESH_TOKEN`) — paste the real values, not the example placeholders. `NEXT_PUBLIC_DEMO_INSTRUCTION` is optional; the `ALICE_*`/`BOB_*` seed-only variables are not needed at runtime.
+4. Deploy. Vercel runs `npm install` (which generates the Prisma client via `postinstall`) then `next build` automatically — no extra build configuration needed.
+5. Visit the deployed URL, sign in with your `ZEROTRACE_OPERATOR_SESSION_SECRET` passcode at `/login`, and confirm the connection gate shows all three providers connected.
+
 ## Safety warning
 
 This is a hackathon-scoped reference implementation. **Do not point it at a production identity provider, a real employee, or a real project without an independent security review.** It is designed to fail closed (block rather than guess), but it has not been audited, and provider adapter edge cases (pagination limits, rate limits under load, org-specific permission models) are handled to the depth the six-hour build budget allowed, not exhaustively.
